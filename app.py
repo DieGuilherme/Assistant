@@ -1,31 +1,37 @@
+
 import streamlit as st
 import os
 import openai
 import time
-from supabase import create_client, Client
 from datetime import datetime
+from supabase import create_client, Client
 
-# --- Supabase config ---
-SUPABASE_URL = st.secrets["SUPABASE_URL"]
-SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+# --- Supabase config (via secrets ou fallback env/local) ---
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
+SUPABASE_KEY = st.secrets.get("SUPABASE_SERVICE_ROLE_KEY", os.getenv("SUPABASE_SERVICE_ROLE_KEY"))
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- OpenAI config ---
-openai.api_key = os.getenv("OPENAI_API_KEY")
+openai.api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
 ASSISTANT_ID = "asst_cfa9tkkdCAh1yulc4mf4p06n"
 
 st.set_page_config(page_title="SDR Modernista", layout="centered")
 st.title("🤖 SDR Modernista")
 st.markdown("Converse com o nosso assistente inteligente.")
 
+# --- Identificação ---
 user_id = st.text_input("Identifique-se (nome ou email):", key="user_id")
 
+
+# --- Utilidades Supabase ---
 def get_or_create_thread(user_id):
     result = supabase.table("messages").select("thread_id").eq("user_id", user_id).limit(1).execute()
     if result.data:
         return result.data[0]["thread_id"]
     thread = openai.beta.threads.create()
     return thread.id
+
 
 def save_message(user_id, thread_id, role, content):
     supabase.table("messages").insert({
@@ -36,19 +42,19 @@ def save_message(user_id, thread_id, role, content):
         "created_at": datetime.utcnow().isoformat()
     }).execute()
 
+
 def load_history(user_id):
     result = supabase.table("messages").select("*").eq("user_id", user_id).order("created_at").execute()
     return result.data if result.data else []
 
+
+# --- Execução principal ---
 if user_id:
     thread_id = get_or_create_thread(user_id)
 
     if "history" not in st.session_state:
         st.session_state.history = []
-
-        # carregar do Supabase
-        past = load_history(user_id)
-        for msg in past:
+        for msg in load_history(user_id):
             st.session_state.history.append((msg["role"], msg["content"]))
 
     user_input = st.chat_input("Digite sua mensagem")
@@ -71,7 +77,10 @@ if user_id:
                 )
 
                 while True:
-                    status = openai.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
+                    status = openai.beta.threads.runs.retrieve(
+                        thread_id=thread_id,
+                        run_id=run.id
+                    )
                     if status.status == "completed":
                         break
                     elif status.status == "failed":
@@ -93,6 +102,7 @@ if user_id:
             st.session_state.history.append(("assistant", reply))
             save_message(user_id, thread_id, "assistant", reply)
 
+    # --- Render histórico ---
     for role, message in st.session_state.history:
         with st.chat_message(role):
             st.markdown(message)
