@@ -2,85 +2,97 @@ import streamlit as st
 import os
 import openai
 import time
-import hashlib
+from supabase import create_client, Client
+from datetime import datetime
 
+# --- Supabase config ---
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# --- OpenAI config ---
 openai.api_key = os.getenv("OPENAI_API_KEY")
-ASSISTANT_ID = "asst_Cfa9tkKdCAh1yulc4mf4pO6n"
+ASSISTANT_ID = "asst_cfa9tkkdCAh1yulc4mf4p06n"
 
 st.set_page_config(page_title="SDR Modernista", layout="centered")
 st.title("🤖 SDR Modernista")
 st.markdown("Converse com o nosso assistente inteligente.")
 
-# Identificação do usuário
 user_id = st.text_input("Identifique-se (nome ou email):", key="user_id")
 
+def get_or_create_thread(user_id):
+    result = supabase.table("messages").select("thread_id").eq("user_id", user_id).limit(1).execute()
+    if result.data:
+        return result.data[0]["thread_id"]
+    thread = openai.beta.threads.create()
+    return thread.id
+
+def save_message(user_id, thread_id, role, content):
+    supabase.table("messages").insert({
+        "user_id": user_id,
+        "thread_id": thread_id,
+        "role": role,
+        "content": content,
+        "created_at": datetime.utcnow().isoformat()
+    }).execute()
+
+def load_history(user_id):
+    result = supabase.table("messages").select("*").eq("user_id", user_id).order("created_at").execute()
+    return result.data if result.data else []
+
 if user_id:
-    # Gera um thread_id único e persistente por usuário
-    thread_key = "thread_" + hashlib.sha1(user_id.encode()).hexdigest()
-    if thread_key not in st.session_state:
-        thread = openai.beta.threads.create()
-        st.session_state[thread_key] = thread.id
+    thread_id = get_or_create_thread(user_id)
 
-    thread_id = st.session_state[thread_key]
-
-    # Inicializa histórico visual do chat
     if "history" not in st.session_state:
         st.session_state.history = []
+
+        # carregar do Supabase
+        past = load_history(user_id)
+        for msg in past:
+            st.session_state.history.append((msg["role"], msg["content"]))
 
     user_input = st.chat_input("Digite sua mensagem")
 
     if user_input:
         st.session_state.history.append(("user", user_input))
+        save_message(user_id, thread_id, "user", user_input)
 
         with st.spinner("Assistente está pensando..."):
             try:
-                # Adiciona mensagem do usuário à thread
                 openai.beta.threads.messages.create(
                     thread_id=thread_id,
                     role="user",
                     content=user_input
                 )
 
-                # Executa o assistente
                 run = openai.beta.threads.runs.create(
                     thread_id=thread_id,
                     assistant_id=ASSISTANT_ID
                 )
 
-                # Aguarda execução ser concluída
                 while True:
-                    run_status = openai.beta.threads.runs.retrieve(
-                        thread_id=thread_id,
-                        run_id=run.id
-                    )
-                    if run_status.status == "completed":
+                    status = openai.beta.threads.runs.retrieve(thread_id=thread_id, run_id=run.id)
+                    if status.status == "completed":
                         break
-                    elif run_status.status == "failed":
-                        raise Exception("A execução do assistente falhou.")
+                    elif status.status == "failed":
+                        raise Exception("A execução falhou.")
                     time.sleep(1)
 
-                # Recupera todas as mensagens da thread
                 messages = openai.beta.threads.messages.list(thread_id=thread_id)
 
-                # DEBUG: Exibe no terminal o histórico da thread
-                print("\n[🔍 HISTÓRICO DA THREAD]")
-                for msg in reversed(messages.data):
-                    print(f"{msg.role}: {msg.content[0].text.value}")
-
-                # Pega a última resposta do assistente
                 for msg in reversed(messages.data):
                     if msg.role == "assistant":
                         reply = msg.content[0].text.value
                         break
                 else:
-                    reply = "⚠️ Nenhuma resposta do assistente."
+                    reply = "⚠️ Nenhuma resposta recebida."
 
             except Exception as e:
                 reply = f"⚠️ Erro ao conectar com o assistente: {e}"
 
             st.session_state.history.append(("assistant", reply))
+            save_message(user_id, thread_id, "assistant", reply)
 
-    # Renderiza mensagens no chat
     for role, message in st.session_state.history:
         with st.chat_message(role):
             st.markdown(message)
