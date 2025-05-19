@@ -5,7 +5,7 @@ import time
 import hashlib
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
-ASSISTANT_ID = "asst_mxd6yUB2vmSyJm34UxbtnSd6"
+ASSISTANT_ID = "asst_Cfa9tkKdCAh1yulc4mf4pO6n"
 
 st.set_page_config(page_title="SDR Modernista", layout="centered")
 st.title("🤖 SDR Modernista")
