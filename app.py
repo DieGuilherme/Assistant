@@ -14,7 +14,7 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # --- OpenAI config ---
 openai.api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-ASSISTANT_ID = "asst_cfa9tkkdCAh1yulc4mf4p06n"
+ASSISTANT_ID = "asst_mxd6yUB2vmSyJm34UxbtnSd6"
 
 st.set_page_config(page_title="SDR Modernista", layout="centered")
 st.title("🤖 SDR Modernista")
